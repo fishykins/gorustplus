@@ -3,7 +3,6 @@ package pkg
 import (
 	"errors"
 	"fmt"
-	"os"
 	"reflect"
 
 	"github.com/gorilla/websocket"
@@ -63,7 +62,7 @@ func (c *Client) Disconnect() error {
 // Adds a device to be registered post connection. This is useful for devices that are of an unknown type,
 // or for devices that we want the client to initialize with their current values.
 func (c *Client) RegisterDevice(id uint32, name string, out *SmartDevice) error {
-	device := NewPendingDevice(id, name, out, nil)
+	device := NewPendingDevice(id, name, out, nil, nil)
 	if c.connection != nil {
 		return c.initDevice(device)
 	} else {
@@ -75,7 +74,19 @@ func (c *Client) RegisterDevice(id uint32, name string, out *SmartDevice) error 
 // Adds a device to be registered post connection. This is useful for devices that are of an unknown type,
 // or for devices that we want the client to initialize with their current values.
 func (c *Client) RegisterDeviceWithCallback(id uint32, name string, callback OnRegistered) error {
-	device := NewPendingDevice(id, name, nil, callback)
+	device := NewPendingDevice(id, name, nil, callback, nil)
+	if c.connection != nil {
+		return c.initDevice(device)
+	} else {
+		c.pendingDevices = append(c.pendingDevices, device)
+	}
+	return nil
+}
+
+// Adds a device to be registered post connection. This is useful for devices that are of an unknown type,
+// or for devices that we want the client to initialize with their current values.
+func (c *Client) RegisterDeviceWithChan(id uint32, name string, out chan *SmartDevice) error {
+	device := NewPendingDevice(id, name, nil, nil, out)
 	if c.connection != nil {
 		return c.initDevice(device)
 	} else {
@@ -236,25 +247,8 @@ func (c *Client) initDevice(device *PendingDevice) error {
 	req.EntityId = &id
 	req.GetEntityInfo = &AppEmpty{}
 
-	cb := RegisterCallback{
-		device:       *device,
-		out:          device.GetOut(),
-		onRegistered: *device.GetCb(),
-		inner: func(c *Client, m *AppResponse, d PendingDevice, out *SmartDevice) {
-			if m.EntityInfo != nil {
-				id := d.GetId()
-				name := d.GetName()
-				if err != nil {
-					fmt.Println("Error removing device:", err)
-					os.Exit(4)
-				}
-				d := NewSmartDevice(id, name, *m.EntityInfo.Type)
-				c.AddDevice(d)
-				if out != nil {
-					*out = *d
-				}
-			}
-		},
+	cb := RegisterDevice{
+		device: *device,
 	}
 	return c.Write(req, cb)
 }

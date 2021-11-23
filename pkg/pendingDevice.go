@@ -5,6 +5,7 @@ type PendingDevice struct {
 	id           uint32
 	name         string
 	out          *SmartDevice
+	outChan      chan *SmartDevice
 	onRegistered OnRegistered
 }
 
@@ -24,11 +25,16 @@ func (d *PendingDevice) GetCb() *OnRegistered {
 	return &d.onRegistered
 }
 
-func NewPendingDevice(id uint32, name string, out *SmartDevice, onRegistered OnRegistered) *PendingDevice {
+func (d *PendingDevice) GetChan() chan *SmartDevice {
+	return d.outChan
+}
+
+func NewPendingDevice(id uint32, name string, out *SmartDevice, onRegistered OnRegistered, outChan chan *SmartDevice) *PendingDevice {
 	return &PendingDevice{
 		id:           id,
 		name:         name,
 		out:          out,
 		onRegistered: onRegistered,
+		outChan:      outChan,
 	}
 }
