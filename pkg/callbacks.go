@@ -4,6 +4,10 @@ type Callback interface {
 	Run(c *Client, m *AppResponse)
 }
 
+//==============================================================================
+//=========================== Device Callbacks =================================
+//==============================================================================
+
 type DeviceCallbackFunc func(c *Client, m *AppResponse, d SmartDevice)
 type OnRegistered func(d *SmartDevice)
 

@@ -21,7 +21,7 @@ type Client struct {
 	callbacks      map[uint32]Callback
 }
 
-// Instansiates a new static client.
+// Instansiates a new static client. This will overwrite any existing client so be careful!
 func NewClient(connectionData *ConnectionData) *Client {
 	client = Client{
 		connectionData: connectionData,
@@ -85,7 +85,7 @@ func (c *Client) RegisterDeviceWithCallback(id uint32, name string, callback OnR
 }
 
 // Force adds a device, bypassing server authentication.
-//This is useful for when we already know what kind of device it is and want to handle its initialization oursleves.
+//This is useful for when we already know what kind of device it is and want to handle its initialization ourselves.
 func (c *Client) AddDevice(device *SmartDevice) error {
 	fmt.Printf("Added device \"%s\" of type %s\n", device.GetName(), reflect.TypeOf(device))
 	c.devices[device.GetId()] = device
@@ -121,10 +121,11 @@ func (c *Client) Write(request *AppRequest, callback Callback) error {
 	return nil
 }
 
-func (c *Client) Read() error {
+// Reads a message from the websocket. This is a blocking call.
+func (c *Client) Read() (*AppMessage, error) {
 	_, message, err := c.connection.ReadMessage()
 	if err != nil {
-		return fmt.Errorf("connection error: %s", err)
+		return nil, fmt.Errorf("connection error: %s", err)
 	}
 
 	if message != nil {
@@ -132,22 +133,25 @@ func (c *Client) Read() error {
 		err = proto.Unmarshal(message, &appMessage)
 		//fmt.Println("Read:", &appMessage)
 		if err != nil {
-			return fmt.Errorf("unmarshalling error: %s", err)
+			return nil, fmt.Errorf("unmarshalling error: %s", err)
 		}
+		return &appMessage, nil
+	}
+	return nil, nil
+}
 
-		// If response, execute callback
-		if appMessage.Response != nil {
-			if c.callbacks[*appMessage.Response.Seq] != nil {
-				cb := c.callbacks[*appMessage.Response.Seq]
-				cb.Run(c, appMessage.Response)
-				delete(c.callbacks, *appMessage.Response.Seq)
-			}
-			return nil
-		}
-		// If broadcast, handle any updates
-		if appMessage.Broadcast != nil {
-			return nil
-		}
+// Handles the given message, executing any callbacks.
+func (c *Client) HandleMessage(message *AppMessage) error {
+	if message == nil {
+		return errors.New("message is nil")
+	}
+	// If response, execute callback
+	if message.Response != nil {
+		return c.handleResponse(message.Response)
+	}
+	// If broadcast, handle any updates
+	if message.Broadcast != nil {
+		return c.handleBroadcast(message.Broadcast)
 	}
 	return nil
 }
@@ -179,6 +183,43 @@ func (c *Client) getSeq() uint32 {
 	s := c.seq
 	c.seq++
 	return s
+}
+
+func (c *Client) handleResponse(r *AppResponse) error {
+	if r == nil {
+		return errors.New("response is nil")
+	}
+	if c.callbacks[*r.Seq] != nil {
+		cb := c.callbacks[*r.Seq]
+		cb.Run(c, r)
+		delete(c.callbacks, *r.Seq)
+	}
+	return nil
+}
+
+func (c *Client) handleBroadcast(b *AppBroadcast) error {
+	if b == nil {
+		return errors.New("broadcast is nil")
+	}
+	if b.EntityChanged != nil {
+		entityId := *b.EntityChanged.EntityId
+		if device, ok := c.devices[entityId]; ok {
+			device.Update(b.EntityChanged.Payload)
+		} else {
+			return fmt.Errorf("device not found: %d", entityId)
+		}
+	}
+	if b.TeamMessage != nil {
+		fmt.Println("WARNING: message handling not yet implimented!")
+		fmt.Printf("Team message: %s\n", b.TeamMessage.Message)
+	}
+	if b.TeamChanged != nil {
+		player := b.TeamChanged.PlayerId
+		teamInfo := b.TeamChanged.TeamInfo
+		fmt.Println("WARNING: Team update handling not yet implimented!")
+		fmt.Printf("Team update: %v (%v members)\n", player, len(teamInfo.Members))
+	}
+	return nil
 }
 
 // Send a request for device info so we can spesify the device type
