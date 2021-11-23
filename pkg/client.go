@@ -3,50 +3,52 @@ package pkg
 import (
 	"errors"
 	"fmt"
+	"os"
+	"reflect"
 
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/proto"
 )
 
+var client = Client{}
+
 type Client struct {
-	useProxy        bool
-	ip              string
-	port            uint64
-	connection      *websocket.Conn
-	tokens          []PlayerToken
-	seq             uint32
-	callbacks       map[uint32]func(*AppResponse)
-	deviceCallbacks map[uint32]*Device
-	devices         map[uint32]*Device
+	connectionData *ConnectionData
+	connection     *websocket.Conn
+	seq            uint32
+	pendingDevices []*PendingDevice
+	devices        map[uint32]*SmartDevice
+	callbacks      map[uint32]Callback
 }
 
-func NewClient(ip string, port uint64) Client {
-	return Client{
-		ip:              ip,
-		port:            port,
-		callbacks:       make(map[uint32]func(*AppResponse)),
-		deviceCallbacks: make(map[uint32]*Device),
-		devices:         make(map[uint32]*Device),
+// Instansiates a new static client.
+func NewClient(connectionData *ConnectionData) *Client {
+	client = Client{
+		connectionData: connectionData,
+		seq:            0,
+		devices:        make(map[uint32]*SmartDevice),
+		callbacks:      make(map[uint32]Callback),
 	}
+	return &client
+}
+
+// Gets the static client
+func GetClient() *Client {
+	return &client
 }
 
 func (c *Client) Connect() error {
-	adr := c.Address()
-	connection, _, err := websocket.DefaultDialer.Dial(adr, nil)
+	var err error
+	c.connection, _, err = websocket.DefaultDialer.Dial(c.connectionData.URL(), nil)
 	if err != nil {
 		return err
 	}
-	if connection == nil {
-		return errors.New("connection is nil")
+	if len(c.pendingDevices) > 0 {
+		for _, device := range c.pendingDevices {
+			c.initDevice(device)
+		}
+		c.pendingDevices = []*PendingDevice{}
 	}
-
-	c.connection = connection
-	c.seq = 0
-
-	for _, device := range c.devices {
-		c.initDevice(device)
-	}
-
 	return nil
 }
 
@@ -58,50 +60,109 @@ func (c *Client) Disconnect() error {
 	return nil
 }
 
-func (c *Client) ClearCache() {
-	c.callbacks = make(map[uint32]func(*AppResponse))
-	c.deviceCallbacks = make(map[uint32]*Device)
-}
-
-func (c *Client) Address() string {
-	if c.useProxy {
-		return fmt.Sprintf("wss://companion-rust.facepunch.com/game/%s/%d", c.ip, c.port)
-	} else {
-		return fmt.Sprintf("ws://%s:%d", c.ip, c.port)
-	}
-}
-
-func (c *Client) AddToken(token PlayerToken) {
-	c.tokens = append(c.tokens, token)
-}
-
-func (c *Client) AddDevice(device *Device) {
-	c.devices[device.Id] = device
+// Adds a device to be registered post connection. This is useful for devices that are of an unknown type,
+// or for devices that we want the client to initialize with their current values.
+func (c *Client) RegisterDevice(id uint32, name string, out *SmartDevice) error {
+	device := NewPendingDevice(id, name, out, nil)
 	if c.connection != nil {
-		c.initDevice(device)
+		return c.initDevice(device)
+	} else {
+		c.pendingDevices = append(c.pendingDevices, device)
 	}
+	return nil
 }
 
-func (c *Client) RemoveDevice(device Device) {
-	delete(c.devices, device.Id)
+// Adds a device to be registered post connection. This is useful for devices that are of an unknown type,
+// or for devices that we want the client to initialize with their current values.
+func (c *Client) RegisterDeviceWithCallback(id uint32, name string, callback OnRegistered) error {
+	device := NewPendingDevice(id, name, nil, callback)
+	if c.connection != nil {
+		return c.initDevice(device)
+	} else {
+		c.pendingDevices = append(c.pendingDevices, device)
+	}
+	return nil
 }
 
-func (c *Client) initDevice(device *Device) {
-	fmt.Println("connecting device", device.Name)
-	c.GetDeviceState(device)
+// Force adds a device, bypassing server authentication.
+//This is useful for when we already know what kind of device it is and want to handle its initialization oursleves.
+func (c *Client) AddDevice(device *SmartDevice) error {
+	fmt.Printf("Added device \"%s\" of type %s\n", device.GetName(), reflect.TypeOf(device))
+	c.devices[device.GetId()] = device
+	return nil
 }
 
-func (c *Client) newRequest() (*AppRequest, error) {
+// Removes a device from the client.
+func (c *Client) RemoveDevice(d SmartDevice) error {
+	if _, ok := c.devices[d.GetId()]; ok {
+		delete(c.devices, d.GetId())
+		return nil
+	}
+	return fmt.Errorf("device not found: %d", d.GetId())
+}
+
+func (c *Client) TryGetDevice(id uint32) (*SmartDevice, error) {
+	if _, ok := c.devices[id]; ok {
+		return c.devices[id], nil
+	}
+	return nil, fmt.Errorf("device not found: %d", id)
+}
+
+// Writes the request to websocket and prep callback if provided.
+func (c *Client) Write(request *AppRequest, callback Callback) error {
+	data, err := proto.Marshal(request)
+	if err != nil {
+		return err
+	}
+	c.connection.WriteMessage(websocket.BinaryMessage, data)
+	if callback != nil {
+		c.callbacks[*request.Seq] = callback
+	}
+	return nil
+}
+
+func (c *Client) Read() error {
+	_, message, err := c.connection.ReadMessage()
+	if err != nil {
+		return fmt.Errorf("connection error: %s", err)
+	}
+
+	if message != nil {
+		appMessage := AppMessage{}
+		err = proto.Unmarshal(message, &appMessage)
+		//fmt.Println("Read:", &appMessage)
+		if err != nil {
+			return fmt.Errorf("unmarshalling error: %s", err)
+		}
+
+		// If response, execute callback
+		if appMessage.Response != nil {
+			if c.callbacks[*appMessage.Response.Seq] != nil {
+				cb := c.callbacks[*appMessage.Response.Seq]
+				cb.Run(c, appMessage.Response)
+				delete(c.callbacks, *appMessage.Response.Seq)
+			}
+			return nil
+		}
+		// If broadcast, handle any updates
+		if appMessage.Broadcast != nil {
+			return nil
+		}
+	}
+	return nil
+}
+
+// Builds a base request.
+func (c *Client) NewRequest() (*AppRequest, error) {
 	if c.connection == nil {
 		return nil, errors.New("connection is nil")
 	}
-	if len(c.tokens) == 0 {
+	if len(c.connectionData.Tokens) == 0 {
 		return nil, errors.New("no tokens")
 	}
-	token := c.tokens[0]
+	token := c.connectionData.Tokens[0]
 
-	seq := c.seq
-	c.seq++
+	seq := c.getSeq()
 	request := AppRequest{
 		Seq:         &seq,
 		PlayerId:    &token.SteamId,
@@ -110,99 +171,49 @@ func (c *Client) newRequest() (*AppRequest, error) {
 	return &request, nil
 }
 
-func (c *Client) Write(request *AppRequest) error {
-	data, err := proto.Marshal(request)
+// =====================================================================================================================
+// ============================================== Private Functions ====================================================
+// =====================================================================================================================
+
+func (c *Client) getSeq() uint32 {
+	s := c.seq
+	c.seq++
+	return s
+}
+
+// Send a request for device info so we can spesify the device type
+func (c *Client) initDevice(device *PendingDevice) error {
+	id := device.GetId()
+	name := device.GetName()
+	fmt.Printf("%s (%d) init...\n", name, id)
+
+	req, err := c.NewRequest()
 	if err != nil {
 		return err
 	}
-	c.connection.WriteMessage(websocket.BinaryMessage, data)
-	return nil
-}
 
-func (c *Client) Read() (*AppResponse, error) {
-	_, message, err := c.connection.ReadMessage()
-	if err != nil {
-		return nil, fmt.Errorf("connection error: %s", err)
-	}
+	req.EntityId = &id
+	req.GetEntityInfo = &AppEmpty{}
 
-	if message != nil {
-		response := AppMessage{}
-		err = proto.Unmarshal(message, &response)
-		if err != nil {
-			return nil, fmt.Errorf("unmarshalling error: %s", err)
-		}
-
-		// If response, execute callback
-		if response.Response != nil {
-			// Parse any useful data
-			c.parseMessageData(response.Response)
-			c.executeCallback(response.Response)
-			return response.Response, nil
-		}
-		// If broadcast, handle any updates
-		if response.Broadcast != nil {
-			c.handleBroadcast(response.Broadcast)
-		}
-	}
-
-	return nil, nil
-}
-
-func (c *Client) parseMessageData(response *AppResponse) {
-	if response.EntityInfo != nil {
-		if device, ok := c.deviceCallbacks[*response.Seq]; ok {
-			device.entType = *response.EntityInfo.Type
-		}
-	}
-}
-
-func (c *Client) handleBroadcast(broadcast *AppBroadcast) {
-	if broadcast.EntityChanged != nil {
-		if device, ok := c.devices[*broadcast.EntityChanged.EntityId]; ok {
-			if device.entType != AppEntityType_StorageMonitor {
-				device.value = *broadcast.EntityChanged.Payload.Value
-				device.OnUpdate(device)
-			} else {
-				if *broadcast.EntityChanged.Payload.Value {
-					device.items = broadcast.EntityChanged.Payload.Items
-					device.capacity = broadcast.EntityChanged.Payload.Capacity
-					device.OnUpdate(device)
+	cb := RegisterCallback{
+		device:       *device,
+		out:          device.GetOut(),
+		onRegistered: *device.GetCb(),
+		inner: func(c *Client, m *AppResponse, d PendingDevice, out *SmartDevice) {
+			if m.EntityInfo != nil {
+				id := d.GetId()
+				name := d.GetName()
+				if err != nil {
+					fmt.Println("Error removing device:", err)
+					os.Exit(4)
+				}
+				d := NewSmartDevice(id, name, *m.EntityInfo.Type)
+				c.AddDevice(d)
+				if out != nil {
+					*out = *d
 				}
 			}
-		}
+		},
 	}
-}
-
-func (c *Client) executeCallback(response *AppResponse) {
-	if response.Seq == nil {
-		return
-	}
-	seq := *response.Seq
-
-	if response.EntityInfo == nil {
-		// Standard callback pattern
-		if callback, ok := c.callbacks[seq]; ok {
-			callback(response)
-			delete(c.callbacks, seq)
-		}
-	} else {
-		// Handle device callback
-		if device, ok := c.deviceCallbacks[seq]; ok {
-			if device.OnUpdate != nil {
-				device.OnUpdate(device)
-			}
-			delete(c.deviceCallbacks, seq)
-		}
-	}
-}
-
-func (c *Client) sendRequest(request *AppRequest, callback func(*AppResponse)) error {
-	err := c.Write(request)
-	if err != nil {
-		return err
-	}
-	if callback != nil {
-		c.callbacks[*request.Seq] = callback
-	}
-	return nil
+	return c.Write(req, cb)
 }

@@ -1,4 +1,4 @@
-module github.com/fishykins/gorust
+module github.com/fishykins/gorustplus
 
 go 1.16
 
