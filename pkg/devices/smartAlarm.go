@@ -5,8 +5,8 @@ type SmartAlarm struct {
 	id   uint32
 }
 
-func NewSmartAlarm(id uint32, name string) SmartSwitch {
-	return SmartSwitch{
+func NewSmartAlarm(id uint32, name string) SmartAlarm {
+	return SmartAlarm{
 		id:   id,
 		name: name,
 	}

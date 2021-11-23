@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 
 	"github.com/fishykins/gorust/pkg"
 	"github.com/fishykins/gorust/pkg/devices"
@@ -11,11 +12,26 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+type pendingDevice struct {
+	id   uint32
+	name string
+	out  *devices.SmartDevice
+}
+
+func (d *pendingDevice) GetName() string {
+	return d.name
+}
+
+func (d *pendingDevice) GetId() uint32 {
+	return d.id
+}
+
 type Client struct {
 	connectionData *ConnectionData
 	connection     *websocket.Conn
 	seq            uint32
-	devices        []*devices.SmartDevice
+	pendingDevices []*pendingDevice
+	devices        map[uint32]*devices.SmartDevice
 	callbacks      map[uint32]Callback
 }
 
@@ -23,7 +39,7 @@ func NewClient(connectionData *ConnectionData) *Client {
 	return &Client{
 		connectionData: connectionData,
 		seq:            0,
-		devices:        make([]*devices.SmartDevice, 0),
+		devices:        make(map[uint32]*devices.SmartDevice),
 		callbacks:      make(map[uint32]Callback),
 	}
 }
@@ -34,10 +50,11 @@ func (c *Client) Connect() error {
 	if err != nil {
 		return err
 	}
-	if len(c.devices) > 0 {
-		for _, device := range c.devices {
-			c.initDevice(*device)
+	if len(c.pendingDevices) > 0 {
+		for _, device := range c.pendingDevices {
+			c.initDevice(device)
 		}
+		c.pendingDevices = []*pendingDevice{}
 	}
 	return nil
 }
@@ -50,31 +67,44 @@ func (c *Client) Disconnect() error {
 	return nil
 }
 
-// Adds a device to be registered post connection
-func (c *Client) RegisterDevice(device devices.SmartDevice) error {
-	c.devices = append(c.devices, &device)
+// Adds a device to be registered post connection. This is useful for devices that are of an unknown type,
+// or for devices that we want the client to initialize with their current values.
+func (c *Client) RegisterDevice(id uint32, name string, out devices.SmartDevice) error {
+	device := &pendingDevice{
+		id:   id,
+		name: name,
+		out:  &out,
+	}
 	if c.connection != nil {
 		return c.initDevice(device)
+	} else {
+		c.pendingDevices = append(c.pendingDevices, device)
 	}
 	return nil
 }
 
 // Force adds a device, bypassing server authentication.
-//This is useful for when we already know what kind of device it is and its current state.
-func (c *Client) ForceAddDevice(device devices.SmartDevice) error {
-	c.devices = append(c.devices, &device)
+//This is useful for when we already know what kind of device it is and want to handle its initialization oursleves.
+func (c *Client) AddDevice(device devices.SmartDevice) error {
+	fmt.Printf("Added device \"%s\" of type %s\n", device.GetName(), reflect.TypeOf(device))
+	c.devices[device.GetId()] = &device
 	return nil
 }
 
+// Removes a device from the client.
 func (c *Client) RemoveDevice(d devices.SmartDevice) error {
-	for i := 0; i < len(c.devices); i++ {
-		device := *c.devices[i]
-		if device.GetId() == d.GetId() {
-			c.devices = append(c.devices[:i], c.devices[i+1:]...)
-			return nil
-		}
+	if _, ok := c.devices[d.GetId()]; ok {
+		delete(c.devices, d.GetId())
+		return nil
 	}
 	return fmt.Errorf("device not found: %d", d.GetId())
+}
+
+func (c *Client) TryGetDevice(id uint32) (*devices.SmartDevice, error) {
+	if _, ok := c.devices[id]; ok {
+		return c.devices[id], nil
+	}
+	return nil, fmt.Errorf("device not found: %d", id)
 }
 
 // Writes the request to websocket and prep callback if provided.
@@ -86,9 +116,6 @@ func (c *Client) Write(request *pkg.AppRequest, callback Callback) error {
 	c.connection.WriteMessage(websocket.BinaryMessage, data)
 	if callback != nil {
 		c.callbacks[*request.Seq] = callback
-		fmt.Println("Write (with cb):", request)
-	} else {
-		fmt.Println("Write:", request)
 	}
 	return nil
 }
@@ -102,7 +129,7 @@ func (c *Client) Read() error {
 	if message != nil {
 		appMessage := pkg.AppMessage{}
 		err = proto.Unmarshal(message, &appMessage)
-		fmt.Println("Read:", &appMessage)
+		//fmt.Println("Read:", &appMessage)
 		if err != nil {
 			return fmt.Errorf("unmarshalling error: %s", err)
 		}
@@ -124,18 +151,8 @@ func (c *Client) Read() error {
 	return nil
 }
 
-// =====================================================================================================================
-// ============================================== Private Functions ====================================================
-// =====================================================================================================================
-
-func (c *Client) getSeq() uint32 {
-	s := c.seq
-	c.seq++
-	return s
-}
-
 // Builds a base request.
-func (c *Client) newRequest() (*pkg.AppRequest, error) {
+func (c *Client) NewRequest() (*pkg.AppRequest, error) {
 	if c.connection == nil {
 		return nil, errors.New("connection is nil")
 	}
@@ -153,13 +170,23 @@ func (c *Client) newRequest() (*pkg.AppRequest, error) {
 	return &request, nil
 }
 
+// =====================================================================================================================
+// ============================================== Private Functions ====================================================
+// =====================================================================================================================
+
+func (c *Client) getSeq() uint32 {
+	s := c.seq
+	c.seq++
+	return s
+}
+
 // Send a request for device info so we can spesify the device type
 func (c *Client) initDevice(device devices.SmartDevice) error {
 	id := device.GetId()
 	name := device.GetName()
 	fmt.Printf("%s (%d) init...\n", name, id)
 
-	req, err := c.newRequest()
+	req, err := c.NewRequest()
 	if err != nil {
 		return err
 	}
@@ -174,29 +201,22 @@ func (c *Client) initDevice(device devices.SmartDevice) error {
 				entType := m.EntityInfo.Type
 				id := d.GetId()
 				name := d.GetName()
-				fmt.Printf("Device %s is type %s", name, entType.String())
-				err := c.RemoveDevice(d)
 				if err != nil {
 					fmt.Println("Error removing device:", err)
 					os.Exit(4)
 				}
-				switch entType {
-				case pkg.AppEntityType_Alarm.Enum():
-					{
-						d := devices.NewSmartAlarm(id, name)
-						c.ForceAddDevice(d)
-					}
-				case pkg.AppEntityType_Switch.Enum():
-					{
-						d := devices.NewSmartSwitch(id, name)
-						c.ForceAddDevice(d)
-					}
-
-				case pkg.AppEntityType_StorageMonitor.Enum().Enum():
-					{
-						d := devices.NewSmartBox(id, name)
-						c.ForceAddDevice(d)
-					}
+				switch *entType {
+				case pkg.AppEntityType_Alarm:
+					d := devices.NewSmartAlarm(id, name)
+					c.AddDevice(d)
+				case pkg.AppEntityType_StorageMonitor:
+					d := devices.NewSmartBox(id, name)
+					c.AddDevice(d)
+				case pkg.AppEntityType_Switch:
+					d := devices.NewSmartSwitch(id, name)
+					c.AddDevice(d)
+				default:
+					fmt.Printf("Unknown device type: %s\n", *entType)
 				}
 			}
 		},

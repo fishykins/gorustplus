@@ -5,8 +5,8 @@ type SmartBox struct {
 	id   uint32
 }
 
-func NewSmartBox(id uint32, name string) SmartSwitch {
-	return SmartSwitch{
+func NewSmartBox(id uint32, name string) SmartBox {
+	return SmartBox{
 		id:   id,
 		name: name,
 	}
