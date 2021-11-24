@@ -1,3 +1,3 @@
 package pkg
 
-type BroadcastEvent func(d *SmartDevice, b *AppEntityPayload)
+type BroadcastEvent func(d *Device, b *AppEntityPayload)

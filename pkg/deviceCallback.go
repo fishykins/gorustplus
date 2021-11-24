@@ -1,14 +1,37 @@
 package pkg
 
-type DeviceCallbackFunc func(c *Client, m *AppResponse, d SmartDevice)
-type OnRegistered func(d *SmartDevice)
+import (
+	"fmt"
+	"os"
+)
+
+type DeviceCallbackFunc func(c *Client, m *AppResponse, d Device)
 
 // Standard device callback.
 type DeviceCallback struct {
-	inner  DeviceCallbackFunc
-	device *SmartDevice
+	device   *Device
+	callback DeviceCallbackFunc
 }
 
-func (cb DeviceCallback) Run(c *Client, m *AppResponse) {
-	cb.inner(c, m, *cb.device)
+func NewDeviceCallback(device *Device, callback DeviceCallbackFunc) (*DeviceCallback, error) {
+	if device == nil {
+		return nil, fmt.Errorf("device is nil")
+	}
+	return &DeviceCallback{callback: callback, device: device}, nil
+}
+
+func (dcb DeviceCallback) Run(c *Client, m *AppResponse) {
+	if dcb.device == nil {
+		fmt.Println("DeviceCallback has nil device: This should not happen!")
+		os.Exit(2)
+		return
+	}
+	if dcb.callback != nil {
+		dcb.callback(c, m, *dcb.device)
+	}
+
+	// Update cached values.
+	if m.EntityInfo != nil {
+		dcb.device.SetData(m.EntityInfo.Payload)
+	}
 }

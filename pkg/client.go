@@ -14,8 +14,7 @@ type Client struct {
 	connectionData *ConnectionData
 	connection     *websocket.Conn
 	seq            uint32
-	pendingDevices []*PendingDevice
-	devices        map[uint32]*SmartDevice
+	devices        map[uint32]*Device
 	callbacks      map[uint32]Callback
 }
 
@@ -24,7 +23,7 @@ func NewClient(connectionData *ConnectionData) *Client {
 	client = Client{
 		connectionData: connectionData,
 		seq:            0,
-		devices:        make(map[uint32]*SmartDevice),
+		devices:        make(map[uint32]*Device),
 		callbacks:      make(map[uint32]Callback),
 	}
 	return &client
@@ -41,11 +40,10 @@ func (c *Client) Connect() error {
 	if err != nil {
 		return err
 	}
-	if len(c.pendingDevices) > 0 {
-		for _, device := range c.pendingDevices {
+	if len(c.devices) > 0 {
+		for _, device := range c.devices {
 			c.initDevice(device)
 		}
-		c.pendingDevices = []*PendingDevice{}
 	}
 	return nil
 }
@@ -58,52 +56,17 @@ func (c *Client) Disconnect() error {
 	return nil
 }
 
-// Adds a device to be registered post connection. This is useful for devices that are of an unknown type,
-// or for devices that we want the client to initialize with their current values.
-func (c *Client) RegisterDevice(id uint32, name string, out *SmartDevice) error {
-	device := NewPendingDevice(id, name, out, nil, nil)
-	if c.connection != nil {
-		return c.initDevice(device)
-	} else {
-		c.pendingDevices = append(c.pendingDevices, device)
-	}
-	return nil
-}
-
-// Adds a device to be registered post connection. This is useful for devices that are of an unknown type,
-// or for devices that we want the client to initialize with their current values.
-func (c *Client) RegisterDeviceWithCallback(id uint32, name string, callback OnRegistered) error {
-	device := NewPendingDevice(id, name, nil, callback, nil)
-	if c.connection != nil {
-		return c.initDevice(device)
-	} else {
-		c.pendingDevices = append(c.pendingDevices, device)
-	}
-	return nil
-}
-
-// Adds a device to be registered post connection. This is useful for devices that are of an unknown type,
-// or for devices that we want the client to initialize with their current values.
-func (c *Client) RegisterDeviceWithChan(id uint32, name string, out chan *SmartDevice) error {
-	device := NewPendingDevice(id, name, nil, nil, out)
-	if c.connection != nil {
-		return c.initDevice(device)
-	} else {
-		c.pendingDevices = append(c.pendingDevices, device)
-	}
-	return nil
-}
-
-// Force adds a device, bypassing server authentication.
-//This is useful for when we already know what kind of device it is and want to handle its initialization ourselves.
-func (c *Client) AddDevice(device *SmartDevice) error {
-	fmt.Printf("Added device \"%s\" of type %s\n", device.GetName(), device.GetType())
+// Adds a device to the client and initializes it.
+func (c *Client) AddDevice(device *Device) error {
 	c.devices[device.GetId()] = device
+	if c.connection != nil {
+		return c.initDevice(device)
+	}
 	return nil
 }
 
 // Removes a device from the client.
-func (c *Client) RemoveDevice(d SmartDevice) error {
+func (c *Client) RemoveDevice(d Device) error {
 	if _, ok := c.devices[d.GetId()]; ok {
 		delete(c.devices, d.GetId())
 		return nil
@@ -111,7 +74,7 @@ func (c *Client) RemoveDevice(d SmartDevice) error {
 	return fmt.Errorf("device not found: %d", d.GetId())
 }
 
-func (c *Client) TryGetDevice(id uint32) (*SmartDevice, error) {
+func (c *Client) TryGetDevice(id uint32) (*Device, error) {
 	if _, ok := c.devices[id]; ok {
 		return c.devices[id], nil
 	}
@@ -176,7 +139,7 @@ func (c *Client) NewRequest() (*AppRequest, error) {
 	}
 	token := c.connectionData.Tokens[0]
 
-	seq := c.getSeq()
+	seq := c.GetSeq()
 	request := AppRequest{
 		Seq:         &seq,
 		PlayerId:    &token.SteamId,
@@ -189,7 +152,7 @@ func (c *Client) NewRequest() (*AppRequest, error) {
 // ============================================== Private Functions ====================================================
 // =====================================================================================================================
 
-func (c *Client) getSeq() uint32 {
+func (c *Client) GetSeq() uint32 {
 	s := c.seq
 	c.seq++
 	return s
@@ -199,6 +162,7 @@ func (c *Client) handleResponse(r *AppResponse) error {
 	if r == nil {
 		return errors.New("response is nil")
 	}
+
 	if c.callbacks[*r.Seq] != nil {
 		cb := c.callbacks[*r.Seq]
 		cb.Run(c, r)
@@ -214,7 +178,9 @@ func (c *Client) handleBroadcast(b *AppBroadcast) error {
 	if b.EntityChanged != nil {
 		entityId := *b.EntityChanged.EntityId
 		if device, ok := c.devices[entityId]; ok {
-			device.Update(b.EntityChanged.Payload)
+			payload := b.EntityChanged.Payload
+			device.BroadcastEvent(payload)
+			device.SetData(payload)
 		} else {
 			return fmt.Errorf("device not found: %d", entityId)
 		}
@@ -233,21 +199,17 @@ func (c *Client) handleBroadcast(b *AppBroadcast) error {
 }
 
 // Send a request for device info so we can spesify the device type
-func (c *Client) initDevice(device *PendingDevice) error {
+func (c *Client) initDevice(device *Device) error {
 	id := device.GetId()
-	name := device.GetName()
+	name := device.Name
 	fmt.Printf("%s (%d) init...\n", name, id)
 
 	req, err := c.NewRequest()
 	if err != nil {
 		return err
 	}
-
 	req.EntityId = &id
 	req.GetEntityInfo = &AppEmpty{}
-
-	cb := RegisterDevice{
-		device: *device,
-	}
+	cb, _ := NewDeviceCallback(device, device.onInit)
 	return c.Write(req, cb)
 }
