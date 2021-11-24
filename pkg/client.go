@@ -16,6 +16,9 @@ type Client struct {
 	seq            uint32
 	devices        map[uint32]*Device
 	callbacks      map[uint32]Callback
+
+	// Chat channel. Leaving this unread will block the client so be careful!
+	Chat chan *AppChatMessage
 }
 
 // Instansiates a new static client. This will overwrite any existing client so be careful!
@@ -25,6 +28,7 @@ func NewClient(connectionData *ConnectionData) *Client {
 		seq:            0,
 		devices:        make(map[uint32]*Device),
 		callbacks:      make(map[uint32]Callback),
+		Chat:           nil,
 	}
 	return &client
 }
@@ -185,10 +189,10 @@ func (c *Client) handleBroadcast(b *AppBroadcast) error {
 			return fmt.Errorf("device not found: %d", entityId)
 		}
 	}
-	if b.TeamMessage != nil {
-		fmt.Println("WARNING: message handling not yet implimented!")
-		fmt.Printf("Team message: %s\n", b.TeamMessage.Message)
+	if b.TeamMessage != nil && c.Chat != nil {
+		c.Chat <- b.TeamMessage.Message
 	}
+
 	if b.TeamChanged != nil {
 		player := b.TeamChanged.PlayerId
 		teamInfo := b.TeamChanged.TeamInfo
