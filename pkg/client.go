@@ -3,7 +3,6 @@ package pkg
 import (
 	"errors"
 	"fmt"
-	"reflect"
 
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/proto"
@@ -98,7 +97,7 @@ func (c *Client) RegisterDeviceWithChan(id uint32, name string, out chan *SmartD
 // Force adds a device, bypassing server authentication.
 //This is useful for when we already know what kind of device it is and want to handle its initialization ourselves.
 func (c *Client) AddDevice(device *SmartDevice) error {
-	fmt.Printf("Added device \"%s\" of type %s\n", device.GetName(), reflect.TypeOf(device))
+	fmt.Printf("Added device \"%s\" of type %s\n", device.GetName(), device.GetType())
 	c.devices[device.GetId()] = device
 	return nil
 }

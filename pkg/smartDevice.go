@@ -7,16 +7,16 @@ import (
 // A device with a known type
 type SmartDevice struct {
 	id         uint32
-	name       string
+	Name       string
 	entityType AppEntityType
-	onUpdate   map[uint32]func(d *SmartDevice, b *AppEntityPayload)
+	onUpdate   map[uint32]BroadcastEvent
 	uSeq       uint32
 }
 
 func NewSmartDevice(id uint32, name string, entityType AppEntityType) *SmartDevice {
 	return &SmartDevice{
 		id:         id,
-		name:       name,
+		Name:       name,
 		entityType: entityType,
 		uSeq:       0,
 	}
@@ -27,15 +27,15 @@ func (d *SmartDevice) GetId() uint32 {
 }
 
 func (d *SmartDevice) GetName() string {
-	return d.name
+	return d.Name
 }
 
-func (d *SmartDevice) GetEntityType() AppEntityType {
+func (d *SmartDevice) GetType() AppEntityType {
 	return d.entityType
 }
 
 // Registers an update event for this device.
-func (d *SmartDevice) AddUpdateEvent(f func(d *SmartDevice, b *AppEntityPayload)) uint32 {
+func (d *SmartDevice) AddBroadcastEvent(f BroadcastEvent) uint32 {
 	d.uSeq++
 	d.onUpdate[d.uSeq] = f
 	return d.uSeq

@@ -7,6 +7,7 @@ type PendingDevice struct {
 	out          *SmartDevice
 	outChan      chan *SmartDevice
 	onRegistered OnRegistered
+	OnUpdate     []BroadcastEvent
 }
 
 func (d *PendingDevice) GetId() uint32 {
@@ -30,11 +31,13 @@ func (d *PendingDevice) GetChan() chan *SmartDevice {
 }
 
 func NewPendingDevice(id uint32, name string, out *SmartDevice, onRegistered OnRegistered, outChan chan *SmartDevice) *PendingDevice {
-	return &PendingDevice{
+	d := &PendingDevice{
 		id:           id,
 		name:         name,
 		out:          out,
 		onRegistered: onRegistered,
 		outChan:      outChan,
+		OnUpdate:     make([]BroadcastEvent, 0),
 	}
+	return d
 }

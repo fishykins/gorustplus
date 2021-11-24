@@ -21,7 +21,7 @@ func (cb RegisterDevice) Run(c *Client, m *AppResponse) {
 			*cb.device.out = *smartDevice
 		}
 
-		if cb.device.onRegistered != nil {
+		if cb.device.onRegistered != nil && cb.device.out != nil {
 			// Run the followup callback
 			cb.onRegistered(cb.device.out)
 		}
