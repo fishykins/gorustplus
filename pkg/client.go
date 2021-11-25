@@ -17,8 +17,9 @@ type Client struct {
 	devices        map[uint32]*Device
 	callbacks      map[uint32]Callback
 
-	// Chat channel. Leaving this unread will block the client so be careful!
+	// Assigning channels will cause the client to block until the channel is read. use with caution!
 	Chat chan *AppChatMessage
+	Team chan *AppTeamChanged
 }
 
 // Instansiates a new static client. This will overwrite any existing client so be careful!
@@ -133,25 +134,6 @@ func (c *Client) HandleMessage(message *AppMessage) error {
 	return nil
 }
 
-// Builds a base request.
-func (c *Client) NewRequest() (*AppRequest, error) {
-	if c.connection == nil {
-		return nil, errors.New("connection is nil")
-	}
-	if len(c.connectionData.Tokens) == 0 {
-		return nil, errors.New("no tokens")
-	}
-	token := c.connectionData.Tokens[0]
-
-	seq := c.GetSeq()
-	request := AppRequest{
-		Seq:         &seq,
-		PlayerId:    &token.SteamId,
-		PlayerToken: &token.Token,
-	}
-	return &request, nil
-}
-
 // =====================================================================================================================
 // ============================================== Private Functions ====================================================
 // =====================================================================================================================
@@ -169,7 +151,7 @@ func (c *Client) handleResponse(r *AppResponse) error {
 
 	if c.callbacks[*r.Seq] != nil {
 		cb := c.callbacks[*r.Seq]
-		cb.Run(c, r)
+		cb.Call(c, r)
 		delete(c.callbacks, *r.Seq)
 	}
 	return nil
@@ -193,11 +175,8 @@ func (c *Client) handleBroadcast(b *AppBroadcast) error {
 		c.Chat <- b.TeamMessage.Message
 	}
 
-	if b.TeamChanged != nil {
-		player := b.TeamChanged.PlayerId
-		teamInfo := b.TeamChanged.TeamInfo
-		fmt.Println("WARNING: Team update handling not yet implimented!")
-		fmt.Printf("Team update: %v (%v members)\n", player, len(teamInfo.Members))
+	if b.TeamChanged != nil && c.Team != nil {
+		c.Team <- b.TeamChanged
 	}
 	return nil
 }
