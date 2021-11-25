@@ -6,7 +6,7 @@ import (
 )
 
 type Callback interface {
-	Call(c *Client, m *AppResponse)
+	Call(m *AppResponse)
 }
 
 //====================================================================================
@@ -14,14 +14,14 @@ type Callback interface {
 //====================================================================================
 
 type PrimitiveCallback struct {
-	inner func(c *Client, m *AppResponse)
+	inner func(m *AppResponse)
 }
 
-func (cb *PrimitiveCallback) Call(c *Client, m *AppResponse) {
-	cb.inner(c, m)
+func (cb *PrimitiveCallback) Call(m *AppResponse) {
+	cb.inner(m)
 }
 
-func NewPrimitiveCb(inner func(c *Client, m *AppResponse)) *PrimitiveCallback {
+func NewPrimitiveCb(inner func(m *AppResponse)) *PrimitiveCallback {
 	return &PrimitiveCallback{inner}
 }
 
@@ -29,7 +29,7 @@ func NewPrimitiveCb(inner func(c *Client, m *AppResponse)) *PrimitiveCallback {
 //============================== Device Callback =====================================
 //====================================================================================
 
-type DeviceCallbackFunc func(c *Client, m *AppResponse, d Device)
+type DeviceCallbackFunc func(m *AppResponse, d Device)
 
 // Standard device callback.
 type DeviceCallback struct {
@@ -44,14 +44,14 @@ func NewDeviceCallback(device *Device, callback DeviceCallbackFunc) (*DeviceCall
 	return &DeviceCallback{callback: callback, device: device}, nil
 }
 
-func (dcb DeviceCallback) Call(c *Client, m *AppResponse) {
+func (dcb DeviceCallback) Call(m *AppResponse) {
 	if dcb.device == nil {
 		fmt.Println("DeviceCallback has nil device: This should not happen!")
 		os.Exit(2)
 		return
 	}
 	if dcb.callback != nil {
-		dcb.callback(c, m, *dcb.device)
+		dcb.callback(m, *dcb.device)
 	}
 
 	// Update cached values.
@@ -68,7 +68,7 @@ type ServerCallback struct {
 	inner func(info *AppInfo)
 }
 
-func (cb *ServerCallback) Call(c *Client, m *AppResponse) {
+func (cb *ServerCallback) Call(m *AppResponse) {
 	if m.Info != nil {
 		cb.inner(m.Info)
 	}
@@ -86,7 +86,7 @@ type MapCallback struct {
 	inner func(data *AppMap)
 }
 
-func (cb *MapCallback) Call(c *Client, m *AppResponse) {
+func (cb *MapCallback) Call(m *AppResponse) {
 	if cb.inner != nil && m.Map != nil {
 		cb.inner(m.Map)
 	}

@@ -22,7 +22,7 @@ type Client struct {
 	Team chan *AppTeamChanged
 }
 
-// Instansiates a new static client. This will overwrite any existing client so be careful!
+// Instantiates a new static client. This will overwrite any existing client so be careful!
 func NewClient(connectionData *ConnectionData) *Client {
 	client = Client{
 		connectionData: connectionData,
@@ -51,6 +51,10 @@ func (c *Client) Connect() error {
 		}
 	}
 	return nil
+}
+
+func (c *Client) Connected() bool {
+	return c.connection != nil
 }
 
 func (c *Client) Disconnect() error {
@@ -151,7 +155,7 @@ func (c *Client) handleResponse(r *AppResponse) error {
 
 	if c.callbacks[*r.Seq] != nil {
 		cb := c.callbacks[*r.Seq]
-		cb.Call(c, r)
+		cb.Call(r)
 		delete(c.callbacks, *r.Seq)
 	}
 	return nil
@@ -181,7 +185,7 @@ func (c *Client) handleBroadcast(b *AppBroadcast) error {
 	return nil
 }
 
-// Send a request for device info so we can spesify the device type
+// Send a request for device info so we can specify the device type
 func (c *Client) initDevice(device *Device) error {
 	id := device.GetId()
 	name := device.Name

@@ -87,3 +87,14 @@ func (d *Device) SetData(b *AppEntityPayload) {
 	d.value = b.Value
 	// TODO: Add box support
 }
+
+// A quick and simple way to write value to the websocket with no callback.
+func (d *Device) WriteValue(value bool) error {
+	c := GetClient()
+	return c.SetDeviceInfo(d, value, nil)
+}
+
+func (d *Device) ReadValue(callback DeviceCallbackFunc) error {
+	c := GetClient()
+	return c.GetDeviceInfo(d, callback)
+}
