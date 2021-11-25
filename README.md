@@ -1,11 +1,30 @@
-# GoRustPlus
 <div id="top"></div>
 
-This is an **unofficial** websocket api for the PC game [Rust](https://store.steampowered.com/app/252490/Rust/) and its companion app, Rusplus.
+<!-- PROJECT LOGO -->
+<br />
+<div align="center">
+  <a href="https://github.com/fishykins/gorustplus/assets/smartAlarm.png">
+    <img src="assets/smartAlarm.png" alt="Logo" width="120" height="120">
+  </a>
 
-Websocket interactions were first documented in [Rustplus](https://github.com/liamcottle/rustplus.js), for more details hop on over to Liam's repo. 
+  <h3 align="center">GoRustPlus</h3>
+
+  <p align="center">
+    An unofficial websocket api for the PC game <strong>Rust</strong> and its companion app, <strong>Rustplus</strong>.
+    <br />
+    <a href="https://github.com/fishykins/gorustplus/">Documentation</a>
+    ·
+    <a href="https://store.steampowered.com/app/252490/Rust/">Rust</a>
+    ·
+    <a href="https://github.com/liamcottle/rustplus.js">Rustplus.js</a>
+
+  </p>
+</div>
+
+
 
 ## About The Project
+Websocket interactions were first documented in [Rustplus.js](https://github.com/liamcottle/rustplus.js), for more details hop on over to Liam's repo. 
 GoRustPlus was developed to help facilitate more advanced discord/rust interactions, as well as providing the community with an alternative option to JS when programing bots.
 As apps written to handle such interactions rely heavily on concurrency and scalability, Golang seems like the perfect fit for the job!
 

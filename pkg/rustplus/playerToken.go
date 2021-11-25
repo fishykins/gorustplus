@@ -1,4 +1,4 @@
-package pkg
+package rustplus
 
 type PlayerToken struct {
 	Name    string

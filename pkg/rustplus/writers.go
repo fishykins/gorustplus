@@ -1,4 +1,4 @@
-package pkg
+package rustplus
 
 // Helper functions to handle both request building and writing, with callback support.
 // Use the simple request functions if you require greater finesse in your callbacks!

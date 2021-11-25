@@ -5,7 +5,7 @@
 // 	protoc        v3.19.1
 // source: internal/rustplus.proto
 
-package pkg
+package rustplus
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
